@@ -1,0 +1,79 @@
+/* ==========================================================================
+   GLOBAL STYLES
+   ========================================================================== */
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: black;
+}
+
+/* Custom VGA font */
+@font-face {
+    font-family: 'Px437';
+    src: url('Px437_IBM_VGA_8x16.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* Make bitmap font render crisp and pixelated (disable font smoothing)
+   Applied where the Px437 font is used for a retro VGA look */
+html,
+body,
+#screen>div,
+#screen>div.fullscreen {
+    -webkit-font-smoothing: none;
+    /* Chrome, Safari, Opera */
+    -moz-osx-font-smoothing: grayscale;
+    /* Firefox on macOS */
+    text-rendering: optimizeSpeed;
+}
+
+/* ==========================================================================
+   SCREEN CONTAINER
+   ========================================================================== */
+#screen {
+    width: 100vw;
+    height: 100vh;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    background: black;
+    overflow: hidden;
+}
+
+/* Terminal text overlay in v86 */
+#screen>div {
+    font: 24px monospace;
+    display: block !important;
+    width: 100vw;
+    height: 100vh;
+    position: fixed;
+}
+
+#screen>div.fullscreen {
+    --cell-w: calc(100vw / 80);
+    --cell-h: calc(100vh / 25);
+    --scale: min(var(--cell-w), calc(var(--cell-h) * 0.5));
+    font-family: 'Px437';
+    font-size: calc(var(--scale) * 2);
+    width: unset;
+    height: unset;
+}
+
+/* 
+   FORCE CANVAS TO STAY FULLSCREEN 
+   Prevents v86 from shrinking the layout when GRUB/VGA changes resolution 
+*/
+#screen canvas {
+    width: 100vw !important;
+    height: 100vh !important;
+    object-fit: contain;
+    image-rendering: pixelated;
+    position: fixed;
+}

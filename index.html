@@ -1,273 +1,35 @@
-<!doctype html>
-<title>Basic Emulator</title>
+<!DOCTYPE html>
+<html lang="en">
 
-<div id="screen" class="fullscreen">
-    <div style="white-space: pre; font: 14px monospace; line-height: 14px"></div>
-    <canvas style="display: none"></canvas>
-</div>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OsakaOS</title>
+    <link rel="stylesheet" href="./style.css">
+</head>
 
-<script src="./v86/libv86.js"></script>
+<body>
 
-<style>
-    html,
-    body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        overflow: hidden;
-        background: black;
-    }
+    <!-- ISO controls hidden for now -->
+    <div id="controls" style="position: fixed; top: 10px; right: 10px; z-index: 9999; display: none; gap: 10px;">
+        <button onclick="downloadISO()"
+            style="padding: 10px 15px; background: #2196F3; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
+            ⬇️ Download ISO
+        </button>
+        <button onclick="triggerFileUpload()"
+            style="padding: 10px 15px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
+            ⬆️ Upload ISO
+        </button>
+    </div>
 
-    #screen {
-        width: 100vw;
-        height: 100vh;
+    <div id="screen" class="fullscreen">
+        <div class="fullscreen" style="white-space: pre; "></div>
+        <canvas style="display: none"></canvas>
+    </div>
 
-        display: flex;
-        align-items: center;
-        justify-content: center;
+    <script src="./v86/libv86.js"></script>
+    <script src="./script.js"></script>
 
-        background: black;
-        overflow: hidden;
-    }
+</body>
 
-    #screen>div {
-        font: 24px monospace !important;
-        display: block !important;
-        width: 100vw;
-        height: 100vh;
-        position: fixed;
-    }
-
-    /* FORCE CANVAS TO STAY FULLSCREEN EVEN WHEN V86 CHANGES RESOLUTION */
-    #screen canvas {
-        width: 100vw !important;
-        height: 100vh !important;
-        object-fit: contain;
-        image-rendering: pixelated;
-        position: fixed;
-    }
-</style>
-
-<script>
-    "use strict";
-
-    let inputDisabled = true;
-    setTimeout(() => { inputDisabled = false; }, 1000);
-
-    const blockInput = (e) => {
-        if (inputDisabled) {
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            e.preventDefault();
-            return false;
-        }
-    };
-
-    window.addEventListener("keydown", blockInput, true);
-    window.addEventListener("keyup", blockInput, true);
-    window.addEventListener("keypress", blockInput, true);
-    window.addEventListener("mousedown", blockInput, true);
-    window.addEventListener("mouseup", blockInput, true);
-    window.addEventListener("mousemove", blockInput, true);
-    window.addEventListener("click", blockInput, true);
-    window.addEventListener("dblclick", blockInput, true);
-    window.addEventListener("wheel", blockInput, true);
-
-    // Prevent v86 from stealing important browser shortcuts
-    window.addEventListener("keydown", function (e) {
-        if (e.key === "F11" || e.key === "F12" || e.key === "F5" ||
-            (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) {
-            e.stopImmediatePropagation();
-            return;
-        }
-
-        // Prevent isolated Win (Meta) key from reaching v86
-        if ((e.key === "Meta" || e.key === "OS") && !e.shiftKey && !e.altKey && !e.ctrlKey) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            return;
-        }
-
-        // Unbind default physical Escape key
-        if (e.code === "Escape" || e.key === "Escape") {
-            e.stopImmediatePropagation();
-            e.preventDefault();
-            return;
-        }
-
-        // Shift+Alt sends Escape (Make code)
-        if (e.shiftKey && e.altKey && (e.key === "Shift" || e.key === "Alt")) {
-            e.stopImmediatePropagation();
-            e.preventDefault();
-            window.emulator?.keyboard_send_scancodes([0x01]);
-            window.escTriggeredByShiftAlt = true;
-            return;
-        }
-    }, true);
-
-    // Also block keyup for isolated Win key so v86 doesn't process the release
-    window.addEventListener("keyup", function (e) {
-        if ((e.key === "Meta" || e.key === "OS") && !e.shiftKey && !e.altKey && !e.ctrlKey) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            return;
-        }
-
-        // Block physical Escape keyup
-        if (e.code === "Escape" || e.key === "Escape") {
-            e.stopImmediatePropagation();
-            e.preventDefault();
-            return;
-        }
-
-        // Send Escape Break code when releasing Shift or Alt if we previously triggered it
-        if ((e.key === "Shift" || e.key === "Alt") && window.escTriggeredByShiftAlt) {
-            window.emulator?.keyboard_send_scancodes([0x81]);
-            window.escTriggeredByShiftAlt = false;
-        }
-    }, true);
-
-    window.onload = function () {
-
-        window.emulator = new V86({
-            wasm_path: "./v86/v86.wasm",
-            memory_size: 512 * 1024 * 1024,
-            vga_memory_size: 512 * 1024 * 1024,
-
-            screen_container: document.getElementById("screen"),
-
-            bios: { url: "../bios/seabios.bin" },
-            vga_bios: { url: "../bios/vgabios.bin" },
-
-            hda: { url: "../osakaOS/osakaOS.iso" },
-
-            autostart: true,
-            disable_mouse: true
-        });
-
-        // --- FORCE RESIZE LOOP (this is what stops GRUB/VGA breaking layout) ---
-        const forceResize = () => {
-            const canvas = document.querySelector("#screen canvas");
-            if (!canvas) return;
-
-        };
-
-        setInterval(forceResize, 250);
-
-        window.addEventListener("resize", forceResize);
-        new ResizeObserver(forceResize).observe(document.getElementById("screen"));
-
-        // optional pointer lock on click
-        document.getElementById("screen").addEventListener("click", async () => {
-            try {
-                const screen = document.getElementById("screen");
-                if (screen.requestPointerLock) {
-                    const promise = screen.requestPointerLock();
-                    if (promise) await promise.catch(() => { });
-                }
-                if (navigator.keyboard && navigator.keyboard.lock) {
-                    await navigator.keyboard.lock(["Escape"]).catch(() => { });
-                }
-            } catch (err) {
-                console.warn("Pointer lock could not be acquired: ", err);
-            }
-        });
-
-    };
-</script>
-
-<script>
-    /* =========================
-       YOUR ORIGINAL MOUSE CODE
-       (UNCHANGED LOGIC)
-       ========================= */
-
-    let isMouseSynced = false;
-
-    function findPS2Controller(obj, depth = 0, cache = new Set()) {
-        if (depth > 8 || !obj || typeof obj !== "object") return null;
-        if (cache.has(obj)) return null;
-        cache.add(obj);
-
-        if (obj.mouse_buffer && typeof obj.mouse_buffer.push === 'function' && obj.mouse_id !== undefined) {
-            return obj;
-        }
-
-        for (let key in obj) {
-            try {
-                let res = findPS2Controller(obj[key], depth + 1, cache);
-                if (res) return res;
-            } catch (e) { }
-        }
-        return null;
-    }
-
-    const screenElement = document.getElementById("screen");
-
-    let ignoreNextMouseDelta = false;
-
-    document.addEventListener("pointerlockchange", () => {
-        if (document.pointerLockElement === screenElement) {
-            ignoreNextMouseDelta = true;
-
-            if (!isMouseSynced && window.emulator) {
-                let ps2 = findPS2Controller(window.emulator);
-                if (ps2) {
-                    ps2.mouse_buffer.push(0x00);
-                    ps2.mouse_buffer.push(0x00);
-                    if (typeof ps2.raise_irq === "function") ps2.raise_irq();
-                    isMouseSynced = true;
-                }
-            }
-        }
-    });
-
-    screenElement.addEventListener("mousedown", async function (e) {
-        if (document.pointerLockElement !== screenElement) {
-            try {
-                if (screenElement.requestPointerLock) {
-                    const promise = screenElement.requestPointerLock();
-                    if (promise) await promise.catch(() => { });
-                }
-                if (navigator.keyboard && navigator.keyboard.lock) {
-                    await navigator.keyboard.lock(["Escape"]).catch(() => { });
-                }
-            } catch (err) {
-                console.warn("Pointer lock error slightly suppressed: ", err);
-            }
-            return;
-        }
-
-        window.emulator?.bus?.send("mouse-click", [
-            (e.buttons & 1) !== 0,
-            (e.buttons & 4) !== 0,
-            (e.buttons & 2) !== 0
-        ]);
-    });
-
-    document.addEventListener("mouseup", function (e) {
-        if (document.pointerLockElement === screenElement) {
-            window.emulator?.bus?.send("mouse-click", [
-                (e.buttons & 1) !== 0,
-                (e.buttons & 4) !== 0,
-                (e.buttons & 2) !== 0
-            ]);
-        }
-    });
-
-    document.addEventListener("mousemove", function (e) {
-        if (document.pointerLockElement !== screenElement) return;
-
-        if (ignoreNextMouseDelta) {
-            if (Math.abs(e.movementX) > 50 || Math.abs(e.movementY) > 50) return;
-            ignoreNextMouseDelta = false;
-        }
-
-        let dx = Math.max(-127, Math.min(127, e.movementX));
-        let dy = Math.max(-127, Math.min(127, e.movementY));
-
-        if (dx !== 0 || dy !== 0) {
-            window.emulator?.bus?.send("mouse-delta", [dx, -dy]);
-        }
-    });
-</script>
+</html>
