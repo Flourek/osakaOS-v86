@@ -435,8 +435,8 @@ function setupMouseHandling() {
         if (document.pointerLockElement !== screenElement) return;
 
         if (ignoreNextMouseDelta) {
-            if (Math.abs(e.movementX) > 50 || Math.abs(e.movementY) > 50) return;
             ignoreNextMouseDelta = false;
+            return; // Ignore first movement after pointer lock activation
         }
 
         let dx = Math.max(-127, Math.min(127, e.movementX));
