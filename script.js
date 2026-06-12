@@ -8,6 +8,7 @@ let inputDisabled = true;
 let escTriggeredByShiftAlt = false;
 let escTriggeredByCtrlC = false;
 let ignoreNextMouseDelta = false;
+let savedState = null;
 let emulator;
 
 /* ==========================================================================
@@ -22,6 +23,8 @@ window.onload = function () {
     setupResizeHandling();
     setupMouseHandling();
     setupPointerLockClick();
+
+    autoLoadState();
 };
 
 
@@ -48,6 +51,9 @@ function initEmulator() {
         autostart: true,
         disable_mouse: true // We manually send mouse events using the bus
     });
+
+    // Force audio output to mono (both ears hear the same sound)
+    forceAudioMono();
 
     // Log emulator boot and network status
     emulator.add_listener("emulator-started", () => {
@@ -88,7 +94,20 @@ function setupBlockInput(durationMs) {
 }
 
 function resumeAudio() {
-    emulator.speaker_adapter.audio_context.resume()
+    emulator.speaker_adapter.audio_context.resume();
+    forceAudioMono();
+}
+
+function forceAudioMono() {
+    const mixer = emulator.speaker_adapter?.mixer;
+    if (!mixer || !mixer.node_merger) return;
+    const ctx = emulator.speaker_adapter.audio_context;
+    mixer.node_merger.disconnect();
+    const monoNode = ctx.createGain();
+    monoNode.channelCountMode = "explicit";
+    monoNode.channelCount = 1;
+    mixer.node_merger.connect(monoNode);
+    monoNode.connect(ctx.destination);
 }
 
 /* ==========================================================================
@@ -358,6 +377,120 @@ function triggerFileUpload() {
     input.click();
 }
 
+
+/* ==========================================================================
+   INDEXED DB — large binary state persistence
+   ========================================================================== */
+
+const DB_NAME = "osakaOS";
+const DB_STORE = "state";
+const DB_KEY = "saved-state";
+
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function loadStateFromDB() {
+    try {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(DB_STORE, "readonly");
+            const req = tx.objectStore(DB_STORE).get(DB_KEY);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+    } catch { return null; }
+}
+
+async function saveStateToDB(state) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, "readwrite");
+        const req = tx.objectStore(DB_STORE).put(state, DB_KEY);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function deleteStateFromDB() {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, "readwrite");
+        const req = tx.objectStore(DB_STORE).delete(DB_KEY);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+    });
+}
+
+/* ==========================================================================
+   STATE SAVE / RESTORE
+   ========================================================================== */
+
+function saveState() {
+    emulator.save_state().then(state => {
+        savedState = state;
+        saveStateToDB(state);
+        updateButtons();
+    });
+}
+
+function restoreState() {
+    if (savedState) {
+        emulator.restore_state(savedState);
+    }
+}
+
+function clearSavedState() {
+    savedState = null;
+    deleteStateFromDB();
+    updateButtons();
+}
+
+function updateButtons() {
+    const has = savedState !== null;
+    const restoreBtn = document.querySelector("#controls button#restore-state-btn");
+    const clearBtn = document.querySelector("#controls button#clear-state-btn");
+    if (restoreBtn) restoreBtn.style.display = has ? "" : "none";
+    if (clearBtn) clearBtn.style.display = has ? "" : "none";
+}
+
+function saveStateToFile() {
+    emulator.save_state().then(state => {
+        const now = new Date();
+        const pad = n => String(n).padStart(2, "0");
+        const filename = `osakaOS-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.bin`;
+        const a = document.createElement("a");
+        a.download = filename;
+        a.href = URL.createObjectURL(new Blob([state]));
+        a.click();
+        URL.revokeObjectURL(a.href);
+    });
+}
+
+function restoreStateFromFile(input) {
+    if (!input.files.length) return;
+    const reader = new FileReader();
+    emulator.stop();
+    reader.onload = async function (e) {
+        await emulator.restore_state(e.target.result);
+        emulator.run();
+    };
+    reader.readAsArrayBuffer(input.files[0]);
+    input.value = "";
+}
+
+async function autoLoadState() {
+    const state = await loadStateFromDB();
+    if (state) {
+        savedState = state;
+    }
+    updateButtons();
+}
 
 function setupPointerLockClick() {
     document.getElementById("screen").addEventListener("click", async () => {
