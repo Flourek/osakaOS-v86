@@ -11,6 +11,7 @@ let ignoreNextMouseDelta = false;
 let savedState = null;
 let emulator;
 
+const url = path => new URL(path, location.href).href;
 /* ==========================================================================
    INITIALIZATION
    ========================================================================== */
@@ -46,15 +47,15 @@ function initEmulator() {
     console.log("[EMULATOR] Initializing v86 with networking and audio...");
 
     emulator = new V86({
-        wasm_path: "./v86/v86.wasm",
+        wasm_path: url("./v86/v86.wasm"),
         memory_size: 512 * 1024 * 1024,
         vga_memory_size: 512 * 1024 * 1024,
 
         screen_container: document.getElementById("screen"),
-        bios: { url: "../bios/seabios.bin" },
-        vga_bios: { url: "../bios/vgabios.bin" },
+        bios: { url: url("../bios/seabios.bin") },
+        vga_bios: { url: url("../bios/vgabios.bin") },
 
-        hda: { url: "../osakaOS.iso" },
+        hda: { url: url("../osakaOS.iso") },
 
         // Network relay for external connectivity
         network_relay_url: "wss://relay.widgetry.org/",
@@ -287,116 +288,7 @@ function findPS2Controller(obj, depth = 0, cache = new Set()) {
     return null;
 }
 
-/* ==========================================================================
-   FILE OPERATIONS (Upload/Download)
-   ========================================================================== */
 
-/**
- * Export the entire ISO filesystem as a downloadable blob
- */
-async function downloadISO() {
-    try {
-        if (!emulator || !emulator.get_disks) {
-            console.error("Emulator not ready");
-            return;
-        }
-
-        const disks = emulator.get_disks();
-        if (!disks || disks.length === 0) {
-            console.error("No disks found");
-            return;
-        }
-
-        // Get the first disk (hda)
-        const disk = disks[0];
-        if (!disk) {
-            console.error("HDA disk not found");
-            return;
-        }
-
-        // Request the entire disk buffer
-        disk.get_as_blob(function (blob) {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `osakaOS_${new Date().toISOString().slice(0, 10)}.iso`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            console.log("ISO downloaded successfully");
-        });
-    } catch (err) {
-        console.error("Download failed:", err);
-    }
-}
-
-/**
- * Upload and restore an ISO filesystem
- */
-async function uploadISO(file) {
-    try {
-        if (!file || !file.type.includes("octet-stream") && !file.name.includes(".iso")) {
-            console.error("Invalid file type. Please select an .iso file");
-            return;
-        }
-
-        console.log("Uploading ISO file:", file.name);
-
-        // Read file as ArrayBuffer
-        const arrayBuffer = await file.arrayBuffer();
-
-        // Restart emulator with new ISO
-        if (emulator) {
-            emulator.stop();
-        }
-
-        // Create a blob URL for the uploaded file
-        const blob = new Blob([arrayBuffer], { type: "application/octet-stream" });
-        const isoUrl = URL.createObjectURL(blob);
-
-        // Reinitialize emulator with the uploaded ISO
-        emulator = new V86({
-            wasm_path: "./v86/v86.wasm",
-            memory_size: 512 * 1024 * 1024,
-            vga_memory_size: 512 * 1024 * 1024,
-
-            screen_container: document.getElementById("screen"),
-
-            bios: { url: "../bios/seabios.bin" },
-            vga_bios: { url: "../bios/vgabios.bin" },
-
-            hda: { url: isoUrl },
-
-            network_relay_url: "wss://relay.widgetry.org/",
-
-            autostart: true,
-            disable_mouse: true
-        });
-
-        // Re-setup event handlers
-        setupMouseHandling();
-        setupPointerLockClick();
-
-        console.log("ISO uploaded and emulator restarted");
-    } catch (err) {
-        console.error("Upload failed:", err);
-    }
-}
-
-/**
- * Trigger file upload dialog
- */
-function triggerFileUpload() {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".iso";
-    input.onchange = (e) => {
-        const file = e.target.files[0];
-        if (file) uploadISO(file);
-    };
-    input.click();
-}
 
 
 /* ==========================================================================
