@@ -24,7 +24,18 @@ window.onload = function () {
     setupMouseHandling();
     setupPointerLockClick();
 
+
     autoLoadState();
+    document.getElementById("controls-bar").addEventListener("mousedown", e => e.stopPropagation());
+    document.getElementById("controls-bar").addEventListener("click", e => e.stopPropagation());
+
+    document.getElementById("textmode").addEventListener("mousedown", e => {
+        if (e.target.closest("button")) e.stopPropagation();
+    });
+    document.getElementById("textmode").addEventListener("click", e => {
+        if (e.target.closest("button")) e.stopPropagation();
+    });
+
 };
 
 
@@ -61,7 +72,12 @@ function initEmulator() {
         console.log("[AUDIO] PC speaker output enabled - beeps will play in browser");
         console.log("[NET] Network relay configured - osakaOS should have external connectivity");
         console.log("[NET] Try: ping 8.8.8.8 or ping google.com from osakaOS");
+
+        setTimeout(() => {
+            toggleControls();
+        }, 2000);
     });
+
 }
 
 
@@ -118,14 +134,18 @@ function setupKeyboardOverrides() {
     window.addEventListener("keyup", handleKeyUp, true);
 }
 
+
+function isPointerLocked() {
+    return document.pointerLockElement !== null;
+}
+
 function handleKeyDown(e) {
-    resumeAudio();
-    // 1. Prevent v86 from stealing important browser shortcuts
-    if (e.key === "F11" || e.key === "F12" || e.key === "F5" ||
-        (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) {
+    if (!isPointerLocked()) {
         e.stopImmediatePropagation();
         return;
     }
+
+    resumeAudio();
 
     // 2. Prevent isolated Win (Meta) key from reaching v86
     if ((e.key === "Meta" || e.key === "OS") && !e.shiftKey && !e.altKey && !e.ctrlKey) {
@@ -161,6 +181,7 @@ function handleKeyDown(e) {
 }
 
 function handleKeyUp(e) {
+    if (!isPointerLocked()) return;
     // 1. Block keyup for isolated Win key so v86 doesn't process the release
     if ((e.key === "Meta" || e.key === "OS") && !e.shiftKey && !e.altKey && !e.ctrlKey) {
         e.preventDefault();
@@ -453,17 +474,17 @@ function clearSavedState() {
 
 function updateButtons() {
     const has = savedState !== null;
-    const restoreBtn = document.querySelector("#controls button#restore-state-btn");
-    const clearBtn = document.querySelector("#controls button#clear-state-btn");
-    if (restoreBtn) restoreBtn.style.display = has ? "" : "none";
-    if (clearBtn) clearBtn.style.display = has ? "" : "none";
+    for (const el of document.querySelectorAll("#restore-state-btn, #clear-state-btn")) {
+        el.style.display = has ? "" : "none";
+    }
+    toggleControls();
 }
 
 function saveStateToFile() {
     emulator.save_state().then(state => {
         const now = new Date();
         const pad = n => String(n).padStart(2, "0");
-        const filename = `osakaOS-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.bin`;
+        const filename = `osakaOS-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.bin`;
         const a = document.createElement("a");
         a.download = filename;
         a.href = URL.createObjectURL(new Blob([state]));
@@ -509,6 +530,24 @@ function setupPointerLockClick() {
     });
 }
 
+
+
+function toggleControls() {
+    const vgacontrols = document.querySelector("#controls #controls-bar");
+    if (!isPointerLocked()) {
+        vgacontrols.classList.remove("hidden");
+        const el = document.querySelector("#textmode > div:last-of-type");
+        if (el) {
+            el.innerHTML = vgacontrols.outerHTML;
+            el.innerHTML = vgacontrols.outerHTML;
+        }
+    } else {
+        vgacontrols.classList.add("hidden");
+        emulator?.screen_adapter?.text_update_row(24);
+    };
+}
+
+
 function setupMouseHandling() {
     const screenElement = document.getElementById("screen");
 
@@ -525,7 +564,10 @@ function setupMouseHandling() {
                     isMouseSynced = true;
                 }
             }
+        } else {
+            // showControls();
         }
+        toggleControls();
     });
 
     screenElement.addEventListener("mousedown", async function (e) {

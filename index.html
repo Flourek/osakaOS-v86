@@ -2,48 +2,42 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OsakaOS</title>
-    <link rel="stylesheet" href="./style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OsakaOS</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
 </head>
 
 <body>
-    <div id="controls" style="position: fixed; top: 10px; right: 10px; z-index: 9999; display: flex; flex-direction: column; gap: 4px;">
-        <div style="display: flex; gap: 6px; justify-content: flex-end;">
-            <button id="save-state-btn" onclick="saveState()"
-                style="padding: 6px 10px; background: #FF9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px;">
-                💾 Save
-            </button>
-            <button id="restore-state-btn" onclick="restoreState()"
-                style="padding: 6px 10px; background: #FF9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; display: none;">
-                ⏪ Restore
-            </button>
-            <button id="clear-state-btn" onclick="clearSavedState()"
-                style="padding: 6px 10px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; display: none;">
-                ✕ Clear
-            </button>
-        </div>
-        <div style="display: flex; gap: 6px; justify-content: flex-end;">
-            <button onclick="saveStateToFile()"
-                style="padding: 6px 10px; background: #9C27B0; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px;">
-                ⬇️ State
-            </button>
-            <button onclick="document.getElementById('restore_state_file').click()"
-                style="padding: 6px 10px; background: #673AB7; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px;">
-                ⬆️ State
-            </button>
-            <input id="restore_state_file" type="file" accept=".bin" style="display:none" onchange="restoreStateFromFile(this)">
-        </div>
-    </div>
+  <div id="screen" class="fullscreen">
+    <div id="textmode" class="fullscreen" style="white-space: pre; "></div>
+    <canvas id="vgamode" style="display: none"></canvas>
 
-    <div id="screen" class="fullscreen">
-        <div class="fullscreen" style="white-space: pre; "></div>
-        <canvas style="display: none"></canvas>
-    </div>
+    <div id="controls">
+      <span id="controls-bar"><span>Emulator by FLOUREK</span><span id="controls-buttons" style="margin-left: auto">
 
-    <script src="./v86/libv86.js"></script>
-    <script src="./script.js"></script>
+          <input id="restore_state_file" type="file" accept=".bin" onchange="restoreStateFromFile(this)">
+          <button id="save-state-btn" onclick="saveState()">save</button>
+          <button id="restore-state-btn" onclick="restoreState()" style="display:none">restore</button>
+          <button id="clear-state-btn" onclick="clearSavedState()" style="display:none">clear</button>
+          <button onclick="saveStateToFile()">dl</button>
+          <button onclick="document.getElementById('restore_state_file').click()">up</button>
+
+        </span></span>
+
+      <!-- <div id="controls-left">
+          Emulator By FLOUREK
+        </div>
+        <div id="controls-middle"></div>
+        <div id="controls-buttons">
+        </div>
+      </div> -->
+    </div>
+  </div>
+
+  <script src="./v86/libv86.js"></script>
+  <script src="./script.js"></script>
 
 </body>
 

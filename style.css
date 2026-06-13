@@ -7,8 +7,8 @@ body {
     height: 100%;
     margin: 0;
     overflow: hidden;
-    background: black;
 }
+
 
 /* Custom VGA font */
 @font-face {
@@ -32,10 +32,20 @@ body,
     text-rendering: optimizeSpeed;
 }
 
+.cursor.blinking-cursor {
+    display: none !important;
+}
+
 /* ==========================================================================
    SCREEN CONTAINER
    ========================================================================== */
 #screen {
+    --cell-w: calc(100vw / 80);
+    --cell-h: calc(100vh / 25);
+    --cell-size: min(var(--cell-w), calc(var(--cell-h) / 2));
+    --line: round(down, calc(var(--cell-size) * 2), 1px);
+    --smoothline: calc(var(--cell-size) * 2);
+
     width: 100vw;
     height: 100vh;
 
@@ -57,11 +67,9 @@ body,
 }
 
 #screen>div.fullscreen {
-    --cell-w: calc(100vw / 80);
-    --cell-h: calc(100vh / 25);
-    --scale: min(var(--cell-w), calc(var(--cell-h) * 0.5));
     font-family: 'Px437';
-    font-size: calc(var(--scale) * 2);
+    font-size: var(--line);
+    line-height: var(--line);
     width: unset;
     height: unset;
 }
@@ -76,4 +84,71 @@ body,
     object-fit: contain;
     image-rendering: pixelated;
     position: fixed;
+}
+
+/* ==========================================================================
+   CONTROLS — last-line-of-terminal bar, hacker terminal style
+   ========================================================================== */
+#controls {
+    width: min(100%, calc(100vh * 320 / 200)) !important;
+    height: auto !important;
+    aspect-ratio: 320 / 200 !important;
+    position: absolute !important;
+    pointer-events: none;
+}
+
+#controls-bar {
+    background-color: black;
+    white-space: normal;
+    color: #aaa;
+    display: flex;
+    font-family: 'Px437';
+    font-size: var(--line);
+    line-height: var(--line);
+}
+
+
+#controls #controls-bar {
+    font-size: inherit;
+    line-height: inherit;
+    display: none;
+}
+
+/*  vga mode */
+#screen:has(#textmode[style*="display: none"]) #controls-bar {
+    display: flex;
+    background: #0000a8;
+    top: 93.5%;
+    position: relative;
+    font-size: var(--smoothline);
+    line-height: var(--smoothline);
+    padding: 0.2em 0.3em 0.05em 0.3em;
+    border-top: 0.4em solid #a8a8a8;
+}
+
+#controls-bar.hidden {
+    display: none !important;
+}
+
+#controls-bar input[type="file"] {
+    display: none;
+}
+
+#controls-bar button {
+    background: transparent;
+    border: none;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    text-transform: uppercase;
+    color: #aaa;
+    pointer-events: all;
+}
+
+#controls-bar button:hover {
+    color: #0f0;
+    border-color: #0f0;
 }
