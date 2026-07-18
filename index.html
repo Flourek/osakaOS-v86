@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OsakaOS</title>
   <link rel="stylesheet" href="./style.css">
-  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
 </head>
 
 <body>
@@ -36,6 +35,17 @@
     </div>
   </div>
 
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').then(function (reg) {
+        if (!navigator.serviceWorker.controller) {
+          window.location.reload();
+        }
+      });
+    } else {
+      console.warn('[COOP/COEP] Service Worker unavailable — Chrome will coarsen performance.now()');
+    }
+  </script>
   <script src="./v86/libv86.js"></script>
   <script src="./script.js"></script>
 

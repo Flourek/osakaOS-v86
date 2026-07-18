@@ -3,11 +3,12 @@
 /* ==========================================================================
    STATE & CONSTANTS
    ========================================================================== */
-let isMouseSynced = false;
 let inputDisabled = true;
 let escTriggeredByShiftAlt = false;
+let isMouseSynced = false;
 let escTriggeredByCtrlC = false;
 let ignoreNextMouseDelta = false;
+let hasBeenGraphical = false;
 let savedState = null;
 let emulator;
 
@@ -23,7 +24,6 @@ window.onload = function () {
     setupNetworkDiagnostics();
     setupResizeHandling();
     setupMouseHandling();
-    setupPointerLockClick();
 
 
     autoLoadState();
@@ -51,11 +51,16 @@ function initEmulator() {
         memory_size: 512 * 1024 * 1024,
         vga_memory_size: 512 * 1024 * 1024,
 
-        screen_container: document.getElementById("screen"),
+        screen: {
+            container: document.getElementById("screen"),
+            use_graphical_text: false
+        },
+
         bios: { url: url("../bios/seabios.bin") },
         vga_bios: { url: url("../bios/vgabios.bin") },
 
-        hda: { url: url("../osakaOS.iso") },
+        hda: { url: url("../osakaOS/osakaOS.iso") },
+        // hda: { url: url("../osakaOS2.0.iso") },
 
         // Network relay for external connectivity
         network_relay_url: "wss://relay.widgetry.org/",
@@ -79,12 +84,35 @@ function initEmulator() {
         }, 2000);
     });
 
+    emulator.bus.register("mouse-enable", () => {
+        console.log("enabling da maus lmao");
+    });
+
+    // detect reboot 
+    emulator.add_listener("screen-set-size", function (args) {
+        const bpp = args[2];
+        if (bpp !== 0) {
+            hasBeenGraphical = true;
+        } else if (hasBeenGraphical) {
+            console.log("reboot detected");
+            hasBeenGraphical = false;
+            isMouseSynced = false;
+            blockInput(2000);
+            setTimeout(() => {
+                fixMouse();
+            }, 2000);
+        }
+    });
 }
 
 
 /* ==========================================================================
    INPUT BLOCKING
    ========================================================================== */
+function blockInput(durationMs) {
+    inputDisabled = true;
+    setTimeout(() => { inputDisabled = false; }, durationMs);
+}
 
 function setupBlockInput(durationMs) {
     // Release input lock after durationMs
@@ -354,6 +382,8 @@ function saveState() {
 
 function restoreState() {
     if (savedState) {
+        isMouseSynced = false;
+        fixMouse();
         emulator.restore_state(savedState);
     }
 }
@@ -405,22 +435,6 @@ async function autoLoadState() {
     updateButtons();
 }
 
-function setupPointerLockClick() {
-    document.getElementById("screen").addEventListener("click", async () => {
-        try {
-            const screen = document.getElementById("screen");
-            if (screen.requestPointerLock) {
-                const promise = screen.requestPointerLock();
-                if (promise) await promise.catch(() => { });
-            }
-            if (navigator.keyboard && navigator.keyboard.lock) {
-                await navigator.keyboard.lock(["Escape"]).catch(() => { });
-            }
-        } catch (err) {
-            console.warn("Pointer lock could not be acquired: ", err);
-        }
-    });
-}
 
 
 
@@ -439,27 +453,32 @@ function toggleControls() {
     };
 }
 
+function fixMouse() {
+    ignoreNextMouseDelta = true;
+    if (!isMouseSynced && emulator) {
+        let ps2 = findPS2Controller(emulator);
+        if (ps2) {
+            ps2.mouse_buffer.length = 0;  // Flush any stale bytes
+            ps2.mouse_buffer.push(0x00);   // Phase realignment padding
+            ps2.mouse_buffer.push(0x00);   // (offset 1 → 2 → 0)
+            if (typeof ps2.raise_irq === "function") ps2.raise_irq();
+            isMouseSynced = true;
+        }
+    }
+}
+
 
 function setupMouseHandling() {
     const screenElement = document.getElementById("screen");
 
     document.addEventListener("pointerlockchange", () => {
         if (document.pointerLockElement === screenElement) {
-            ignoreNextMouseDelta = true;
-
-            if (!isMouseSynced && emulator) {
-                let ps2 = findPS2Controller(emulator);
-                if (ps2) {
-                    ps2.mouse_buffer.push(0x00);
-                    ps2.mouse_buffer.push(0x00);
-                    if (typeof ps2.raise_irq === "function") ps2.raise_irq();
-                    isMouseSynced = true;
-                }
-            }
+            fixMouse();
         } else {
             // showControls();
         }
         toggleControls();
+        resumeAudio();
     });
 
     screenElement.addEventListener("mousedown", async function (e) {
@@ -484,7 +503,6 @@ function setupMouseHandling() {
             (e.buttons & 2) !== 0
         ]);
 
-        resumeAudio();
 
     });
 
@@ -501,10 +519,10 @@ function setupMouseHandling() {
     document.addEventListener("mousemove", function (e) {
         if (document.pointerLockElement !== screenElement) return;
 
-        if (ignoreNextMouseDelta) {
-            ignoreNextMouseDelta = false;
-            return; // Ignore first movement after pointer lock activation
-        }
+        // if (ignoreNextMouseDelta) {
+        //     ignoreNextMouseDelta = false;
+        //     return; // Ignore first movement after pointer lock activation
+        // }
 
         let dx = Math.max(-127, Math.min(127, e.movementX));
         let dy = Math.max(-127, Math.min(127, e.movementY));
