@@ -5,9 +5,7 @@
    ========================================================================== */
 let inputDisabled = true;
 let escTriggeredByShiftAlt = false;
-let isMouseSynced = false;
 let escTriggeredByCtrlC = false;
-let ignoreNextMouseDelta = false;
 let hasBeenGraphical = false;
 let savedState = null;
 let emulator;
@@ -43,8 +41,37 @@ window.onload = function () {
 /* ==========================================================================
    EMULATOR SETUP
    ========================================================================== */
-function initEmulator() {
+const HDA_URL = url("../osakaOS/osakaOS.iso");
+
+async function getOrCreateDiskBuffer() {
+    const existing = await getDiskSourceFromDB();
+    const stored = await loadDiskFromDB();
+
+    if (stored instanceof ArrayBuffer && stored.byteLength > 0 && existing === HDA_URL) {
+        console.log(`[DISK] Loaded persistent disk (${stored.byteLength} bytes) from IndexedDB.`);
+        return stored;
+    }
+
+    console.log("[DISK] Seeding persistent disk from", HDA_URL);
+    const response = await fetch(HDA_URL);
+    if (!response.ok) throw new Error("Failed to fetch disk image: " + response.status);
+    const buffer = await response.arrayBuffer();
+    await saveDiskToDB(buffer, HDA_URL);
+    console.log(`[DISK] Seeded disk (${buffer.byteLength} bytes) into IndexedDB.`);
+    return buffer;
+}
+
+async function initEmulator() {
     console.log("[EMULATOR] Initializing v86 with networking and audio...");
+
+    let hdaBuffer;
+    try {
+        hdaBuffer = await getOrCreateDiskBuffer();
+    } catch (err) {
+        console.error("[DISK] Falling back to URL disk load:", err);
+    }
+
+    const hdaConfig = hdaBuffer ? { buffer: hdaBuffer } : { url: HDA_URL };
 
     emulator = new V86({
         wasm_path: url("./v86/v86.wasm"),
@@ -59,7 +86,7 @@ function initEmulator() {
         bios: { url: url("../bios/seabios.bin") },
         vga_bios: { url: url("../bios/vgabios.bin") },
 
-        hda: { url: url("../osakaOS/osakaOS.iso") },
+        hda: hdaConfig,
         // hda: { url: url("../osakaOS2.0.iso") },
 
         // Network relay for external connectivity
@@ -88,7 +115,7 @@ function initEmulator() {
         console.log("enabling da maus lmao");
     });
 
-    // detect reboot 
+    // detect reboot
     emulator.add_listener("screen-set-size", function (args) {
         const bpp = args[2];
         if (bpp !== 0) {
@@ -96,12 +123,23 @@ function initEmulator() {
         } else if (hasBeenGraphical) {
             console.log("reboot detected");
             hasBeenGraphical = false;
-            isMouseSynced = false;
             blockInput(2000);
-            setTimeout(() => {
-                fixMouse();
-            }, 2000);
         }
+    });
+
+    // Persist the writable disk image to IndexedDB so writes survive refreshes.
+    emulator.add_listener("emulator-stopped", persistDisk);
+    emulator.add_listener("emulator-started", () => {
+        if (!window._diskSaveInterval) {
+            window._diskSaveInterval = setInterval(persistDisk, 5000);
+        }
+    });
+
+    const flushDisk = () => { persistDisk(); };
+    window.addEventListener("pagehide", flushDisk);
+    window.addEventListener("beforeunload", flushDisk);
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") persistDisk();
     });
 }
 
@@ -161,6 +199,9 @@ function forceAudioMono() {
 function setupKeyboardOverrides() {
     window.addEventListener("keydown", handleKeyDown, true);
     window.addEventListener("keyup", handleKeyUp, true);
+
+    // Last-resort unload guard: if Ctrl+W slips through preventDefault,
+    // prompt the user before the tab actually closes (gives them a chance to abort).
 }
 
 
@@ -169,6 +210,8 @@ function isPointerLocked() {
 }
 
 function handleKeyDown(e) {
+    // Block Ctrl+W / Cmd+W (close tab) as early as possible
+
     if (!isPointerLocked()) {
         e.stopImmediatePropagation();
         return;
@@ -294,31 +337,6 @@ function setupNetworkDiagnostics() {
     });
 }
 
-/**
- * Searches the v86 object tree for the PS2 Mouse controller to send the activation sequence natively.
- * This fixes the fact that "disable_mouse" prevents true initialization.
- */
-function findPS2Controller(obj, depth = 0, cache = new Set()) {
-    if (depth > 8 || !obj || typeof obj !== "object") return null;
-    if (cache.has(obj)) return null;
-    cache.add(obj);
-
-    if (obj.mouse_buffer && typeof obj.mouse_buffer.push === 'function' && obj.mouse_id !== undefined) {
-        return obj;
-    }
-
-    for (let key in obj) {
-        try {
-            let res = findPS2Controller(obj[key], depth + 1, cache);
-            if (res) return res;
-        } catch (e) { }
-    }
-    return null;
-}
-
-
-
-
 /* ==========================================================================
    INDEXED DB — large binary state persistence
    ========================================================================== */
@@ -326,12 +344,37 @@ function findPS2Controller(obj, depth = 0, cache = new Set()) {
 const DB_NAME = "osakaOS";
 const DB_STORE = "state";
 const DB_KEY = "saved-state";
+const DISK_STORE = "disks";
+const DISK_KEY = "hda";
+const DISK_SOURCE_KEY = "hda-source";
 
 function openDB() {
     return new Promise((resolve, reject) => {
-        const req = indexedDB.open(DB_NAME, 1);
-        req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE);
+        const req = indexedDB.open(DB_NAME, 2);
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
+            if (!db.objectStoreNames.contains(DISK_STORE)) db.createObjectStore(DISK_STORE);
+        };
         req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function idbGet(db, store, key) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(store, "readonly");
+        const req = tx.objectStore(store).get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function idbSet(db, store, key, value) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(store, "readwrite");
+        const req = tx.objectStore(store).put(value, key);
+        req.onsuccess = () => resolve();
         req.onerror = () => reject(req.error);
     });
 }
@@ -368,6 +411,101 @@ async function deleteStateFromDB() {
     });
 }
 
+async function loadDiskFromDB() {
+    try {
+        const db = await openDB();
+        return await idbGet(db, DISK_STORE, DISK_KEY);
+    } catch { return null; }
+}
+
+async function saveDiskToDB(buffer, source) {
+    const db = await openDB();
+    await idbSet(db, DISK_STORE, DISK_KEY, buffer);
+    if (source !== undefined) await idbSet(db, DISK_STORE, DISK_SOURCE_KEY, source);
+}
+
+async function getDiskSourceFromDB() {
+    try {
+        const db = await openDB();
+        return await idbGet(db, DISK_STORE, DISK_SOURCE_KEY);
+    } catch { return null; }
+}
+
+async function deleteDiskFromDB() {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(DISK_STORE, "readwrite");
+        tx.objectStore(DISK_STORE).delete(DISK_KEY);
+        tx.objectStore(DISK_STORE).delete(DISK_SOURCE_KEY);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+function getLiveDiskBuffer() {
+    try {
+        return emulator?.v86?.cpu?.devices?.ide?.primary?.master?.buffer?.buffer ?? null;
+    } catch { return null; }
+}
+
+let diskSaveInProgress = false;
+async function persistDisk() {
+    if (diskSaveInProgress) return;
+    const buffer = getLiveDiskBuffer();
+    if (!buffer) return;
+    diskSaveInProgress = true;
+    try {
+        await saveDiskToDB(buffer, HDA_URL);
+    } catch (err) {
+        console.warn("[DISK] Persist failed:", err);
+    } finally {
+        diskSaveInProgress = false;
+    }
+}
+
+async function wipeDisk() {
+    await deleteDiskFromDB();
+    console.log("[DISK] Persistent disk wiped. Hard refresh to re-install fresh.");
+}
+
+async function resetEmulator() {
+    if (document.pointerLockElement) document.exitPointerLock();
+
+    const confirmed = confirm("This will delete all your data. Are you sure?");
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        if (window._diskSaveInterval) {
+            clearInterval(window._diskSaveInterval);
+            window._diskSaveInterval = null;
+        }
+        if (emulator && emulator.is_running()) {
+            await new Promise(r => {
+                const done = () => { emulator.remove_listener("emulator-stopped", done); r(); };
+                emulator.add_listener("emulator-stopped", done);
+                emulator.stop();
+            });
+        }
+    } catch (err) {
+        console.warn("[RESET] stop failed:", err);
+    }
+
+    try {
+        await wipeDisk();
+        await deleteStateFromDB();
+        savedState = null;
+    } catch (err) {
+        console.error("[RESET] wipe failed:", err);
+        alert("failed to wipe disk — check console");
+        return;
+    }
+
+    location.reload();
+}
+
 /* ==========================================================================
    STATE SAVE / RESTORE
    ========================================================================== */
@@ -382,8 +520,6 @@ function saveState() {
 
 function restoreState() {
     if (savedState) {
-        isMouseSynced = false;
-        fixMouse();
         emulator.restore_state(savedState);
     }
 }
@@ -453,30 +589,11 @@ function toggleControls() {
     };
 }
 
-function fixMouse() {
-    ignoreNextMouseDelta = true;
-    if (!isMouseSynced && emulator) {
-        let ps2 = findPS2Controller(emulator);
-        if (ps2) {
-            ps2.mouse_buffer.length = 0;  // Flush any stale bytes
-            ps2.mouse_buffer.push(0x00);   // Phase realignment padding
-            ps2.mouse_buffer.push(0x00);   // (offset 1 → 2 → 0)
-            if (typeof ps2.raise_irq === "function") ps2.raise_irq();
-            isMouseSynced = true;
-        }
-    }
-}
-
 
 function setupMouseHandling() {
     const screenElement = document.getElementById("screen");
 
     document.addEventListener("pointerlockchange", () => {
-        if (document.pointerLockElement === screenElement) {
-            fixMouse();
-        } else {
-            // showControls();
-        }
         toggleControls();
         resumeAudio();
     });
@@ -485,11 +602,16 @@ function setupMouseHandling() {
         if (document.pointerLockElement !== screenElement) {
             try {
                 if (screenElement.requestPointerLock) {
-                    const promise = screenElement.requestPointerLock();
-                    if (promise) await promise.catch(() => { });
+                    try {
+                        const promise = screenElement.requestPointerLock({ unadjustedMovement: true });
+                        if (promise) await promise;
+                    } catch (err1) {
+                        const promise = screenElement.requestPointerLock();
+                        if (promise) await promise.catch(() => { });
+                    }
                 }
                 if (navigator.keyboard && navigator.keyboard.lock) {
-                    await navigator.keyboard.lock(["Escape"]).catch(() => { });
+                    await navigator.keyboard.lock(["Escape", "KeyW", "KeyT", "KeyN", "F4", "F5"]).catch(() => { });
                 }
             } catch (err) {
                 console.warn("Pointer lock error slightly suppressed: ", err);
@@ -507,23 +629,16 @@ function setupMouseHandling() {
     });
 
     document.addEventListener("mouseup", function (e) {
-        if (document.pointerLockElement === screenElement) {
-            emulator?.bus?.send("mouse-click", [
-                (e.buttons & 1) !== 0,
-                (e.buttons & 4) !== 0,
-                (e.buttons & 2) !== 0
-            ]);
-        }
+        emulator?.bus?.send("mouse-click", [
+            (e.buttons & 1) !== 0,
+            (e.buttons & 4) !== 0,
+            (e.buttons & 2) !== 0
+        ]);
     });
 
     document.addEventListener("mousemove", function (e) {
         if (document.pointerLockElement !== screenElement) return;
-
-        // if (ignoreNextMouseDelta) {
-        //     ignoreNextMouseDelta = false;
-        //     return; // Ignore first movement after pointer lock activation
-        // }
-
+        console.log(e.movementX, e.movementY);
         let dx = Math.max(-127, Math.min(127, e.movementX));
         let dy = Math.max(-127, Math.min(127, e.movementY));
 

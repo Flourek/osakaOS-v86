@@ -22,6 +22,7 @@
           <button id="clear-state-btn" onclick="clearSavedState()" style="display:none">clear</button>
           <button onclick="saveStateToFile()">dl</button>
           <button onclick="document.getElementById('restore_state_file').click()">up</button>
+          <button onclick="resetEmulator()">RESET</button>
 
         </span></span>
 
@@ -37,7 +38,7 @@
 
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').then(function (reg) {
+      navigator.serviceWorker.register('./sw.js').then(function(reg) {
         if (!navigator.serviceWorker.controller) {
           window.location.reload();
         }
